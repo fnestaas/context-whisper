@@ -1174,24 +1174,24 @@ class ContextWhisperForCausalLM(ContextWhisperPreTrainedModel, GenerationMixin):
         )
 
         # If the user passed a tuple or `BaseModelOutput` for encoder_outputs, we extract only the hidden states
-        if isinstance(encoder_outputs, (BaseModelOutput, tuple, list)):
+        if isinstance(encoder_outputs, (BaseModelOutput, tuple, list, BaseModelOutputWithPastAndCrossAttentions)):
             encoder_outputs = encoder_outputs[0]
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
-        outputs = self.model.decoder(
+        outputs = self.model.get_decoder().forward(
             input_ids=decoder_input_ids,
-            decoder_attention_mask=decoder_attention_mask,
+            inputs_embeds=decoder_inputs_embeds,
+            attention_mask=decoder_attention_mask,
+            head_mask=decoder_head_mask,
+            cross_attn_head_mask=decoder_cross_attn_head_mask,
             encoder_hidden_states=encoder_outputs,
-            decoder_head_mask=decoder_head_mask,
-            decoder_cross_attn_head_mask=decoder_cross_attn_head_mask,
             past_key_values=past_key_values,
-            decoder_inputs_embeds=decoder_inputs_embeds,
             use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             cache_position=cache_position,
-            decoder_position_ids=decoder_position_ids,
+            position_ids=decoder_position_ids,
         )
 
         logits = self.proj_out(outputs[0])
