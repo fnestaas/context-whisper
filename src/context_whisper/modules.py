@@ -23,42 +23,26 @@ ContextWhisperDecoder
 
 """
 
-from transformers.models.whisper.modeling_whisper import (
-    WhisperEncoderLayer,
-    WhisperDecoderLayer,
-    WhisperDecoder,
-    WhisperEncoder,
-    WhisperPreTrainedModel,
-    EncoderDecoderCache,
-    BaseModelOutputWithPastAndCrossAttentions,
-    WhisperConfig,
-    WhisperModel,
-    Seq2SeqModelOutput,
-    BaseModelOutput,
-    WHISPER_ATTENTION_CLASSES,
-    ACT2FN,
-    sinusoids,
-    _compute_mask_indices,
-)
-from transformers.models.bert.modeling_bert import (
-    BertModel,
-    BertConfig,
-)
-from transformers.configuration_utils import PretrainedConfig
-# from transformers import AutoModelForSpeechSeq2Seq
-from torch import nn
 import math
-from typing import (
-    Optional,
-    Literal,
-    Tuple,
-    Union,
-    Any
-)
+from typing import Any, Literal, Optional, Tuple, Union
+
 import torch
+from torch import nn
+from transformers import GenerationMixin
+from transformers.configuration_utils import PretrainedConfig
+from transformers.models.bert.modeling_bert import BertConfig, BertModel
+from transformers.models.whisper.modeling_whisper import (
+    ACT2FN, WHISPER_ATTENTION_CLASSES, BaseModelOutput,
+    BaseModelOutputWithPastAndCrossAttentions,
+    CausalLMOutputWithCrossAttentions, EncoderDecoderCache, Seq2SeqModelOutput,
+    WhisperConfig, WhisperDecoder, WhisperDecoderLayer, WhisperEncoder,
+    WhisperEncoderLayer, WhisperForCausalLM, WhisperModel,
+    WhisperPreTrainedModel, _compute_mask_indices, sinusoids)
+
 
 class ContextWhisperConfig(PretrainedConfig):
-    model_type = 'context_whisper'
+    model_type = "context_whisper"
+
     def __init__(
         self,
         vocab_size: int = 51865,
@@ -71,13 +55,13 @@ class ContextWhisperConfig(PretrainedConfig):
         decoder_ffn_dim: int = 1536,
         spectrogram_encoder_layers: int = 4,
         spectrogram_encoder_attention_heads: int = 6,
-        spectrogram_encoder_ffn_dim : int = 1536,
+        spectrogram_encoder_ffn_dim: int = 1536,
         text_encoder_layerdrop: float = 0.0,
         decoder_layerdrop: float = 0.0,
         spectrogram_encoder_layerdrop: float = 0.0,
         decoder_start_token_id: int = 50257,
         use_cache: bool = True,
-        is_encoder_decoder: bool = True, # TODO: I think so? It's just that the encoder is a bit complicated
+        is_encoder_decoder: bool = True,  # TODO: I think so? It's just that the encoder is a bit complicated
         activation_function: str = "gelu",
         d_model: int = 384,
         dropout: float = 0.0,
@@ -102,10 +86,12 @@ class ContextWhisperConfig(PretrainedConfig):
         mask_feature_length: int = 10,
         mask_feature_min_masks: int = 0,
         median_filter_width: int = 7,
-        text_encoder_pretrained_str: Optional[str]=None,
-        decoder_pretrained_str: Optional[str]=None,
-        spectrogram_encoder_pretrained_str: Optional[str]=None,
-        whisper_pretrained_str: Optional[str]=None, # if specified, takes prescendence over {decoder,spectrogram_encoder}pretrained_str
+        text_encoder_pretrained_str: Optional[str] = None,
+        decoder_pretrained_str: Optional[str] = None,
+        spectrogram_encoder_pretrained_str: Optional[str] = None,
+        whisper_pretrained_str: Optional[
+            str
+        ] = None,  # if specified, takes prescendence over {decoder,spectrogram_encoder}pretrained_str
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -130,7 +116,9 @@ class ContextWhisperConfig(PretrainedConfig):
         self.spectrogram_encoder_layerdrop = spectrogram_encoder_layerdrop
         self.use_cache = use_cache
         self.num_hidden_layers = text_encoder_layers
-        self.scale_embedding = scale_embedding  # scale factor will be sqrt(d_model) if True
+        self.scale_embedding = (
+            scale_embedding  # scale factor will be sqrt(d_model) if True
+        )
         self.max_source_positions = max_source_positions
         self.max_target_positions = max_target_positions
 
@@ -150,8 +138,16 @@ class ContextWhisperConfig(PretrainedConfig):
 
         # pretrained args:
         self.text_encoder_pretrained_str = text_encoder_pretrained_str
-        self.decoder_pretrained_str = decoder_pretrained_str if whisper_pretrained_str is None else whisper_pretrained_str
-        self.spectrogram_encoder_pretrained_str = spectrogram_encoder_pretrained_str if whisper_pretrained_str is None else  whisper_pretrained_str
+        self.decoder_pretrained_str = (
+            decoder_pretrained_str
+            if whisper_pretrained_str is None
+            else whisper_pretrained_str
+        )
+        self.spectrogram_encoder_pretrained_str = (
+            spectrogram_encoder_pretrained_str
+            if whisper_pretrained_str is None
+            else whisper_pretrained_str
+        )
         self.whisper_pretrained_str = whisper_pretrained_str
 
         super().__init__(
@@ -165,9 +161,15 @@ class ContextWhisperConfig(PretrainedConfig):
             **kwargs,
         )
 
+
 class ContextWhisperPreTrainedModel(WhisperPreTrainedModel):
     config_class = ContextWhisperConfig
-    _no_split_modules = ["ContextWhisperEncoderLayer", "ContextWhisperSpectrogramEncoderLayer", "ContextWhisperDecoderLayer"]
+    _no_split_modules = [
+        "ContextWhisperEncoderLayer",
+        "ContextWhisperSpectrogramEncoderLayer",
+        "ContextWhisperDecoderLayer",
+    ]
+
     def _init_weights(self, module):
         std = self.config.init_std
         if isinstance(module, (nn.Linear, nn.Conv1d)):
@@ -183,21 +185,27 @@ class ContextWhisperPreTrainedModel(WhisperPreTrainedModel):
                 embed_positions = module.embed_positions.weight
                 embed_positions.copy_(sinusoids(*embed_positions.shape))
 
-    def _freeze_parameters(self): # this is defined in ContextWhisperPreTrainedModel. Not sure why it is not properly inherited. TODO
+    def _freeze_parameters(
+        self,
+    ):  # this is defined in ContextWhisperPreTrainedModel. Not sure why it is not properly inherited. TODO
         for param in self.parameters():
             param.requires_grad = False
         self._requires_grad = False
 
+
 class ContextWhisperEncoderLayer(WhisperEncoderLayer):
     pass  # this is the same and we don't need to change anything (because the layer already works with embeddings and not spectrograms)
 
+
 class ContextWhisperDecoderLayer(WhisperDecoderLayer):
-    pass # This is the same and we do not need to change anything
+    pass  # This is the same and we do not need to change anything
+
 
 class ContextWhisperSpectrogramEncoderLayer(nn.Module):
     """
     Very similar to WhisperDecoderLayer except that it is not causal so we can drop cache functionality
     """
+
     def __init__(self, config: ContextWhisperConfig, layer_idx: int = None):
         super().__init__()
         self.embed_dim = config.d_model
@@ -207,7 +215,7 @@ class ContextWhisperSpectrogramEncoderLayer(nn.Module):
             num_heads=config.decoder_attention_heads,
             dropout=config.attention_dropout,
             is_decoder=True,
-            is_causal=False, # NOTE: important difference to WhisperDecoderLayer
+            is_causal=False,  # NOTE: important difference to WhisperDecoderLayer
             layer_idx=layer_idx,
             config=config,
         )
@@ -231,14 +239,14 @@ class ContextWhisperSpectrogramEncoderLayer(nn.Module):
 
     @classmethod
     def from_whisper_layer(
-        cls, 
-        from_layer: WhisperEncoderLayer, 
+        cls,
+        from_layer: WhisperEncoderLayer,
         layer_idx: int,
-        config: ContextWhisperConfig
-    ) -> 'ContextWhisperSpectrogramEncoderLayer':
+        config: ContextWhisperConfig,
+    ) -> "ContextWhisperSpectrogramEncoderLayer":
         """Take all attributes possible from layer, and add other attributes where required"""
         layer = cls(config, layer_idx=layer_idx)
-        layer.embed_dim = from_layer.embed_dim 
+        layer.embed_dim = from_layer.embed_dim
         layer.self_attn = from_layer.self_attn
         layer.dropout = from_layer.dropout
         layer.activation_fn = from_layer.activation_fn
@@ -289,7 +297,9 @@ class ContextWhisperSpectrogramEncoderLayer(nn.Module):
             output_attentions=output_attentions,
             # cache_position=cache_position,
         )
-        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = nn.functional.dropout(
+            hidden_states, p=self.dropout, training=self.training
+        )
         hidden_states = residual + hidden_states
 
         # Cross-Attention Block
@@ -297,7 +307,11 @@ class ContextWhisperSpectrogramEncoderLayer(nn.Module):
         if encoder_hidden_states is not None:
             residual = hidden_states
             hidden_states = self.encoder_attn_layer_norm(hidden_states)
-            hidden_states, cross_attn_weights, cross_attn_present_key_value = self.encoder_attn(
+            (
+                hidden_states,
+                cross_attn_weights,
+                cross_attn_present_key_value,
+            ) = self.encoder_attn(
                 hidden_states=hidden_states,
                 key_value_states=encoder_hidden_states,
                 attention_mask=encoder_attention_mask,
@@ -305,7 +319,9 @@ class ContextWhisperSpectrogramEncoderLayer(nn.Module):
                 # past_key_value=past_key_value,
                 output_attentions=output_attentions,
             )
-            hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+            hidden_states = nn.functional.dropout(
+                hidden_states, p=self.dropout, training=self.training
+            )
             hidden_states = residual + hidden_states
 
             # add cross-attn to positions 1 of present_key_value tuple
@@ -315,9 +331,13 @@ class ContextWhisperSpectrogramEncoderLayer(nn.Module):
         residual = hidden_states
         hidden_states = self.final_layer_norm(hidden_states)
         hidden_states = self.activation_fn(self.fc1(hidden_states))
-        hidden_states = nn.functional.dropout(hidden_states, p=self.activation_dropout, training=self.training)
+        hidden_states = nn.functional.dropout(
+            hidden_states, p=self.activation_dropout, training=self.training
+        )
         hidden_states = self.fc2(hidden_states)
-        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = nn.functional.dropout(
+            hidden_states, p=self.dropout, training=self.training
+        )
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
@@ -330,8 +350,10 @@ class ContextWhisperSpectrogramEncoderLayer(nn.Module):
 
         return outputs
 
-class ContextWhisperTextEncoder(BertModel, ContextWhisperPreTrainedModel): # TODO
+
+class ContextWhisperTextEncoder(BertModel, ContextWhisperPreTrainedModel):  # TODO
     """This is a wrapper for the BERT encoder"""
+
     def __init__(self, config: ContextWhisperConfig) -> None:
         if config.text_encoder_pretrained_str is None:
             bert_kwargs = ContextWhisperTextEncoder.strip_config_for_bert(config)
@@ -352,7 +374,7 @@ class ContextWhisperTextEncoder(BertModel, ContextWhisperPreTrainedModel): # TOD
                 # position_embedding_type=,
                 use_cache=config.use_cache,
                 # classifier_dropout=,
-                **bert_kwargs
+                **bert_kwargs,
             )
         else:
             bert_cfg = BertConfig.from_pretrained(config.text_encoder_pretrained_str)
@@ -360,60 +382,69 @@ class ContextWhisperTextEncoder(BertModel, ContextWhisperPreTrainedModel): # TOD
 
     @classmethod
     def strip_config_for_bert(cls, config: ContextWhisperConfig) -> dict[str, Any]:
-        drop_attrs = set([
-            'vocab_size',
-            'num_mel_bins',
-            'd_model',
-            'text_encoder_layers',
-            'text_encoder_attention_heads',
-            'decoder_layers',
-            'decoder_attention_heads',
-            'spectrogram_encoder_layers',
-            'spectrogram_encoder_attention_heads',
-            'text_encoder_ffn_dim',
-            'decoder_ffn_dim',
-            'spectrogram_encoder_ffn_dim',
-            'dropout',
-            'attention_dropout',
-            'activation_dropout',
-            'activation_function',
-            'init_std',
-            'text_encoder_layerdrop',
-            'decoder_layerdrop',
-            'spectrogram_encoder_layerdrop',
-            'use_cache',
-            'num_hidden_layers',
-            'scale_embedding',
-            'max_source_positions',
-            'max_target_positions',
-            'classifier_proj_size',
-            'use_weighted_layer_sum',
-            'apply_spec_augment',
-            'mask_time_prob',
-            'mask_time_length',
-            'mask_time_min_masks',
-            'mask_feature_prob',
-            'mask_feature_length',
-            'mask_feature_min_masks',
-            'median_filter_width',
-            'pad_token_id',
-            'bos_token_id',
-            'eos_token_id',
-            'is_encoder_decoder',
-            'decoder_start_token_id',
-            'suppress_tokens',
-            'begin_suppress_tokens',
-        ])
-        keep_attrs = set([
-            # 'pad_token_id',
-            # 'bos_token_id',
-            # 'eos_token_id',
-            # 'is_encoder_decoder',
-            # 'decoder_start_token_id',
-            # 'suppress_tokens',
-            # 'begin_suppress_tokens',
-        ]) # passed to super in ContextWhisperConfig
-        return {k: v for k, v in config.to_dict().items() if k not in drop_attrs - keep_attrs}
+        drop_attrs = set(
+            [
+                "vocab_size",
+                "num_mel_bins",
+                "d_model",
+                "text_encoder_layers",
+                "text_encoder_attention_heads",
+                "decoder_layers",
+                "decoder_attention_heads",
+                "spectrogram_encoder_layers",
+                "spectrogram_encoder_attention_heads",
+                "text_encoder_ffn_dim",
+                "decoder_ffn_dim",
+                "spectrogram_encoder_ffn_dim",
+                "dropout",
+                "attention_dropout",
+                "activation_dropout",
+                "activation_function",
+                "init_std",
+                "text_encoder_layerdrop",
+                "decoder_layerdrop",
+                "spectrogram_encoder_layerdrop",
+                "use_cache",
+                "num_hidden_layers",
+                "scale_embedding",
+                "max_source_positions",
+                "max_target_positions",
+                "classifier_proj_size",
+                "use_weighted_layer_sum",
+                "apply_spec_augment",
+                "mask_time_prob",
+                "mask_time_length",
+                "mask_time_min_masks",
+                "mask_feature_prob",
+                "mask_feature_length",
+                "mask_feature_min_masks",
+                "median_filter_width",
+                "pad_token_id",
+                "bos_token_id",
+                "eos_token_id",
+                "is_encoder_decoder",
+                "decoder_start_token_id",
+                "suppress_tokens",
+                "begin_suppress_tokens",
+            ]
+        )
+        keep_attrs = set(
+            [
+                # 'pad_token_id',
+                # 'bos_token_id',
+                # 'eos_token_id',
+                # 'is_encoder_decoder',
+                # 'decoder_start_token_id',
+                # 'suppress_tokens',
+                # 'begin_suppress_tokens',
+            ]
+        )  # passed to super in ContextWhisperConfig
+        return {
+            k: v
+            for k, v in config.to_dict().items()
+            if k not in drop_attrs - keep_attrs
+        }
+
 
 class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
     """
@@ -422,6 +453,7 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
 
     It is very similar to the implementation of WhisperEconder.
     """
+
     def __init__(
         self,
         config: ContextWhisperConfig,
@@ -437,15 +469,21 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
             self.max_source_positions = config.max_source_positions
             self.embed_scale = math.sqrt(embed_dim) if config.scale_embedding else 1.0
 
-            self.conv1 = nn.Conv1d(self.num_mel_bins, embed_dim, kernel_size=3, padding=1)
-            self.conv2 = nn.Conv1d(embed_dim, embed_dim, kernel_size=3, stride=2, padding=1)
+            self.conv1 = nn.Conv1d(
+                self.num_mel_bins, embed_dim, kernel_size=3, padding=1
+            )
+            self.conv2 = nn.Conv1d(
+                embed_dim, embed_dim, kernel_size=3, stride=2, padding=1
+            )
 
             self.embed_positions = nn.Embedding(self.max_source_positions, embed_dim)
             self.embed_positions.requires_grad_(False)
 
             self.layers = nn.ModuleList(
                 [
-                    ContextWhisperSpectrogramEncoderLayer(config, layer_idx) # Note: in the original encoder, this is a WhisperEncoderLayer
+                    ContextWhisperSpectrogramEncoderLayer(
+                        config, layer_idx
+                    )  # Note: in the original encoder, this is a WhisperEncoderLayer
                     for layer_idx in range(config.spectrogram_encoder_layers)
                 ]
             )
@@ -455,7 +493,9 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
             # Initialize weights and apply final processing
             self.post_init()
         else:
-            pt_config = WhisperConfig.from_pretrained(config.spectrogram_encoder_pretrained_str)
+            pt_config = WhisperConfig.from_pretrained(
+                config.spectrogram_encoder_pretrained_str
+            )
             pt_config = ContextWhisperConfig(**pt_config.to_dict())
             self.__init__(pt_config)
             # new_layers = nn.ModuleList(
@@ -472,12 +512,18 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
             self.config = config
 
     @classmethod
-    def from_whisper(cls, whisper_encoder: WhisperEncoder, config: ContextWhisperConfig) -> 'ContextWhisperSpectrogramEncoder':
-        whisper_spec_enc : ContextWhisperSpectrogramEncoder = cls(config)
-        whisper_spec_enc.layers = nn.ModuleList([
-            ContextWhisperSpectrogramEncoderLayer.from_whisper_layer(layer, idx, config)
-            for idx, layer in enumerate(whisper_encoder.layers)
-        ])
+    def from_whisper(
+        cls, whisper_encoder: WhisperEncoder, config: ContextWhisperConfig
+    ) -> "ContextWhisperSpectrogramEncoder":
+        whisper_spec_enc: ContextWhisperSpectrogramEncoder = cls(config)
+        whisper_spec_enc.layers = nn.ModuleList(
+            [
+                ContextWhisperSpectrogramEncoderLayer.from_whisper_layer(
+                    layer, idx, config
+                )
+                for idx, layer in enumerate(whisper_encoder.layers)
+            ]
+        )
         whisper_spec_enc.conv1 = whisper_encoder.conv1
         whisper_spec_enc.conv2 = whisper_encoder.conv2
         whisper_spec_enc.embed_positions = whisper_encoder.embed_positions
@@ -495,7 +541,7 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
     def set_input_embeddings(self, value: nn.Module):
         self.conv1 = value
 
-    def forward( # This function is more similar to the WhisperDecoder, but the preprocessing is different
+    def forward(  # This function is more similar to the WhisperDecoder, but the preprocessing is different
         self,
         input_features: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
@@ -528,9 +574,15 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
 
         """
 
-        expected_seq_length = self.config.max_source_positions * self.conv1.stride[0] * self.conv2.stride[0]
+        expected_seq_length = (
+            self.config.max_source_positions
+            * self.conv1.stride[0]
+            * self.conv2.stride[0]
+        )
 
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
         inputs_embeds = nn.functional.gelu(self.conv1(input_features))
         inputs_embeds = nn.functional.gelu(self.conv2(inputs_embeds))
         # input_shape = inputs_embeds.size()[:-1]
@@ -540,20 +592,32 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
                 f"Whisper expects the mel input features to be of length {expected_seq_length}, but found {input_features.shape[-1]}. Make sure to pad the input mel features to {expected_seq_length}."
             )
 
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
 
         inputs_embeds = inputs_embeds.permute(0, 2, 1)
-        embed_pos = self.embed_positions.weight # TODO: is this the same as positions in WhisperDecoder.forward?
+        embed_pos = (
+            self.embed_positions.weight
+        )  # TODO: is this the same as positions in WhisperDecoder.forward?
 
         hidden_states = inputs_embeds + embed_pos
-        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = nn.functional.dropout(
+            hidden_states, p=self.dropout, training=self.training
+        )
 
         all_hidden_states = () if output_hidden_states else None
         all_self_attns = () if output_attentions else None
-        all_cross_attentions = () if (output_attentions and encoder_hidden_states is not None) else None
+        all_cross_attentions = (
+            () if (output_attentions and encoder_hidden_states is not None) else None
+        )
 
         # check if head_mask/cross_attn_head_mask has a correct number of layers specified if desired
         for idx, decoder_layer in enumerate(self.layers):
@@ -573,7 +637,9 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
                     encoder_hidden_states,
                     None,  # encoder attention mask
                     head_mask[idx] if head_mask is not None else None,
-                    cross_attn_head_mask[idx] if cross_attn_head_mask is not None else None,
+                    cross_attn_head_mask[idx]
+                    if cross_attn_head_mask is not None
+                    else None,
                     None,  # past_key_value
                     output_attentions,
                 )
@@ -584,7 +650,9 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
                     encoder_hidden_states=encoder_hidden_states,
                     layer_head_mask=(head_mask[idx] if head_mask is not None else None),
                     cross_attn_layer_head_mask=(
-                        cross_attn_head_mask[idx] if cross_attn_head_mask is not None else None
+                        cross_attn_head_mask[idx]
+                        if cross_attn_head_mask is not None
+                        else None
                     ),
                     output_attentions=output_attentions,
                 )
@@ -605,7 +673,13 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
         if not return_dict:
             return tuple(
                 v
-                for v in [hidden_states, next_cache, all_hidden_states, all_self_attns, all_cross_attentions]
+                for v in [
+                    hidden_states,
+                    next_cache,
+                    all_hidden_states,
+                    all_self_attns,
+                    all_cross_attentions,
+                ]
                 if v is not None
             )
         return BaseModelOutputWithPastAndCrossAttentions(
@@ -616,28 +690,27 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
             cross_attentions=all_cross_attentions,
         )
 
+
 class ContextWhisperDecoder(WhisperDecoder, ContextWhisperPreTrainedModel):
     def __init__(self, config: ContextWhisperConfig):
-        # if config.decoder_pretrained_str is not None:
-        #     # TODO: we might want to make this implementation more efficient but this way, we make 
-        #     # it work as quickly as possible
-        #     config = WhisperConfig.from_pretrained(config.decoder_pretrained_str)
         super().__init__(config)
-    
+
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor]=None,
-        attention_mask: Optional[torch.Tensor]=None,
-        encoder_hidden_states: Optional[torch.Tensor]=None,
-        head_mask: Optional[torch.Tensor]=None,
-        cross_attn_head_mask: Optional[torch.Tensor]=None,
-        past_key_values: Optional[Union[EncoderDecoderCache, Tuple[torch.FloatTensor]]]=None,
-        inputs_embeds: Optional[Tuple[torch.Tensor]]=None,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        encoder_hidden_states: Optional[torch.Tensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        cross_attn_head_mask: Optional[torch.Tensor] = None,
+        past_key_values: Optional[
+            Union[EncoderDecoderCache, Tuple[torch.FloatTensor]]
+        ] = None,
+        inputs_embeds: Optional[Tuple[torch.Tensor]] = None,
         position_ids=None,
-        use_cache: Optional[bool]=None,
-        output_attentions: Optional[bool]=None,
-        output_hidden_states: Optional[bool]=None,
-        return_dict: Optional[bool]=None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
         cache_position=None,
     ) -> Tuple | BaseModelOutputWithPastAndCrossAttentions:
         # we implement this function just for type annotations
@@ -657,12 +730,13 @@ class ContextWhisperDecoder(WhisperDecoder, ContextWhisperPreTrainedModel):
             cache_position=cache_position,
         )
 
+
 class ContextWhisperEncoder(ContextWhisperPreTrainedModel):
     def __init__(
         self,
-        config: ContextWhisperConfig, # TODO: are you sure?
+        config: ContextWhisperConfig,  # TODO: are you sure?
         text_encoder: ContextWhisperTextEncoder,
-        spectrogram_encoder: ContextWhisperSpectrogramEncoder
+        spectrogram_encoder: ContextWhisperSpectrogramEncoder,
     ) -> None:
         super().__init__(config)
         self.text_encoder = text_encoder
@@ -671,11 +745,15 @@ class ContextWhisperEncoder(ContextWhisperPreTrainedModel):
     def forward(
         self,
         spectrogram_input_features: Optional[torch.FloatTensor] = None,
-        spectrogram_attention_mask: Optional[torch.LongTensor] = None, # "spectrogram self attention"
+        spectrogram_attention_mask: Optional[
+            torch.LongTensor
+        ] = None,  # "spectrogram self attention"
         encoder_cross_attn_head_mask: Optional[torch.Tensor] = None,
         text_encoder_input_ids: Optional[torch.LongTensor] = None,
         text_encoder_inputs_embeds: Optional[Tuple[torch.FloatTensor]] = None,
-        text_encoder_attention_mask: Optional[torch.LongTensor] = None, # "spectrogram self attention"
+        text_encoder_attention_mask: Optional[
+            torch.LongTensor
+        ] = None,  # "spectrogram self attention"
         encoder_head_mask: Optional[torch.Tensor] = None,
         # handle outputting these:
         # encoder_outputs: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
@@ -688,17 +766,17 @@ class ContextWhisperEncoder(ContextWhisperPreTrainedModel):
             input_ids=text_encoder_input_ids,
             inputs_embeds=text_encoder_inputs_embeds,
             attention_mask=text_encoder_attention_mask,
-            position_ids=None, # TODO: understand this better
+            position_ids=None,  # TODO: understand this better
             # head_mask=,
             # encoder_hidden_states=,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states
+            output_hidden_states=output_hidden_states,
         )
         spec_out = self.spectrogram_encoder.forward(
             input_features=spectrogram_input_features,
             attention_mask=spectrogram_attention_mask,
-            encoder_hidden_states=text_out.pooler_output, # hidden states in text_out
-            head_mask=encoder_head_mask, 
+            encoder_hidden_states=text_out.last_hidden_state,  # hidden states in text_out
+            head_mask=encoder_head_mask,
             cross_attn_head_mask=encoder_cross_attn_head_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
@@ -708,12 +786,13 @@ class ContextWhisperEncoder(ContextWhisperPreTrainedModel):
         # # TODO: format outputs based on output_attentions etc
         # return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         # if not return_dict:
-        #     pass 
+        #     pass
         # return BaseModelOutputWithPastAndCrossAttentions(
         #     last_hidden_state=spec_out.last_hidden_state,
         #     hidden_states=spec_out.hidden_states,
         #     past_key_values=spec_out.past_key_values
         # )
+
 
 class ContextWhisperModel(ContextWhisperPreTrainedModel):
     def __init__(self, config: ContextWhisperConfig):
@@ -723,42 +802,54 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
         if config.text_encoder_pretrained_str is None:
             self.text_encoder = ContextWhisperTextEncoder(config)
         else:
-            assert 'google-bert/' in config.text_encoder_pretrained_str, 'Required in this implementation'
+            assert (
+                "google-bert/" in config.text_encoder_pretrained_str
+            ), "Required in this implementation"
             self.text_encoder = BertModel.from_pretrained(
                 config.text_encoder_pretrained_str
             )
         if config.spectrogram_encoder_pretrained_str is None:
             self.spectrogram_encoder = ContextWhisperSpectrogramEncoder(config)
         else:
-            spectrogram_encoder = WhisperModel.from_pretrained(config.spectrogram_encoder_pretrained_str).get_encoder()
-            self.spectrogram_encoder = ContextWhisperSpectrogramEncoder.from_whisper(spectrogram_encoder, config)
+            spectrogram_encoder = WhisperModel.from_pretrained(
+                config.spectrogram_encoder_pretrained_str
+            ).get_encoder()
+            self.spectrogram_encoder = ContextWhisperSpectrogramEncoder.from_whisper(
+                spectrogram_encoder, config
+            )
             config = self.spectrogram_encoder.config
-        self.encoder = ContextWhisperEncoder(config=config, text_encoder=self.text_encoder, spectrogram_encoder=self.spectrogram_encoder)
+        self.encoder = ContextWhisperEncoder(
+            config=config,
+            text_encoder=self.text_encoder,
+            spectrogram_encoder=self.spectrogram_encoder,
+        )
         # in the case where we load from pretrained, there will be a discrepancy, and we have to reload:
-        # self.text_encoder = self.encoder.text_encoder 
+        # self.text_encoder = self.encoder.text_encoder
         # self.spectrogram_encoder = self.encoder.spectrogram_encoder
         if config.decoder_pretrained_str is None:
             self.decoder = ContextWhisperDecoder(config)
         else:
-            self.decoder = WhisperModel.from_pretrained(config.decoder_pretrained_str).get_decoder()
+            self.decoder = WhisperModel.from_pretrained(
+                config.decoder_pretrained_str
+            ).get_decoder()
         # Initialize weights and apply final processing
-        self.post_init() # from transformers - no worries
+        self.post_init()  # from transformers - no worries
 
-    def get_input_embeddings(self, which: str = 'decoder'):
-        if which == 'decoder':
+    def get_input_embeddings(self, which: str = "decoder"):
+        if which == "decoder":
             return self.decoder.embed_tokens
-        elif which == 'text_encoder':
-            return self.text_encoder.embed_tokens # TODO
+        elif which == "text_encoder":
+            return self.text_encoder.embed_tokens  # TODO
         else:
-            raise ValueError(f'{which=} is not a valid input')
+            raise ValueError(f"{which=} is not a valid input")
 
-    def set_input_embeddings(self, value: torch.Tensor, which: str = 'decoder'):
-        if which == 'decoder':
+    def set_input_embeddings(self, value: torch.Tensor, which: str = "decoder"):
+        if which == "decoder":
             self.decoder.embed_tokens = value
-        elif which == 'text_encoder':
+        elif which == "text_encoder":
             self.text_encoder.embed_tokens = value
         else:
-            raise ValueError(f'{which=} is not a valid input')
+            raise ValueError(f"{which=} is not a valid input")
 
     def get_text_encoder(self):
         return self.text_encoder
@@ -766,17 +857,15 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
     def get_spectrogram_encoder(self):
         return self.spectrogram_encoder
 
+    def get_encoder(self):
+        return self.encoder
+
     def get_decoder(self):
         return self.decoder
 
     def freeze_module(
         self,
-        which: Literal[
-            'text_encoder',
-            'decoder',
-            'spectrogram_encoder',
-            'encoder'
-        ]
+        which: Literal["text_encoder", "decoder", "spectrogram_encoder", "encoder"],
     ) -> None:
         """
         Calling this function will disable the gradient computation for
@@ -816,7 +905,9 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
                 attention_mask=attention_mask,
                 min_masks=self.config.mask_time_min_masks,
             )
-            mask_time_indices = torch.tensor(mask_time_indices, device=input_features.device, dtype=torch.bool)
+            mask_time_indices = torch.tensor(
+                mask_time_indices, device=input_features.device, dtype=torch.bool
+            )
             mask_time_indices = mask_time_indices[:, None].expand(-1, hidden_size, -1)
             input_features[mask_time_indices] = 0
 
@@ -828,7 +919,9 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
                 mask_length=self.config.mask_feature_length,
                 min_masks=self.config.mask_feature_min_masks,
             )
-            mask_feature_indices = torch.tensor(mask_feature_indices, device=input_features.device, dtype=torch.bool)
+            mask_feature_indices = torch.tensor(
+                mask_feature_indices, device=input_features.device, dtype=torch.bool
+            )
             input_features[mask_feature_indices] = 0
 
         return input_features
@@ -836,11 +929,15 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
     def forward(
         self,
         spectrogram_input_features: Optional[torch.FloatTensor] = None,
-        spectrogram_attention_mask: Optional[torch.LongTensor] = None, # "spectrogram self attention"
+        spectrogram_attention_mask: Optional[
+            torch.LongTensor
+        ] = None,  # "spectrogram self attention"
         encoder_cross_attn_head_mask: Optional[torch.Tensor] = None,
         text_encoder_input_ids: Optional[torch.LongTensor] = None,
         text_encoder_inputs_embeds: Optional[Tuple[torch.FloatTensor]] = None,
-        text_encoder_attention_mask: Optional[torch.LongTensor] = None, # "spectrogram self attention"
+        text_encoder_attention_mask: Optional[
+            torch.LongTensor
+        ] = None,  # "spectrogram self attention"
         decoder_input_ids: Optional[torch.LongTensor] = None,
         decoder_inputs_embeds: Optional[Tuple[torch.FloatTensor]] = None,
         decoder_attention_mask: Optional[torch.LongTensor] = None,
@@ -848,7 +945,9 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
         encoder_head_mask: Optional[torch.Tensor] = None,
         decoder_head_mask: Optional[torch.Tensor] = None,
         encoder_outputs: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
-        past_key_values: Optional[Union[EncoderDecoderCache, Tuple[torch.FloatTensor]]] = None,
+        past_key_values: Optional[
+            Union[EncoderDecoderCache, Tuple[torch.FloatTensor]]
+        ] = None,
         decoder_position_ids: Optional[Tuple[torch.LongTensor]] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
@@ -914,27 +1013,39 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
          >>> list(last_hidden_state.shape)
          [1, 2, 512]
          ```"""
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if encoder_outputs is None:
-            spectrogram_input_features = self._mask_input_features(spectrogram_input_features, attention_mask=spectrogram_attention_mask)
+            spectrogram_input_features = self._mask_input_features(
+                spectrogram_input_features, attention_mask=spectrogram_attention_mask
+            )
 
-            encoder_outputs = self.encoder( # TODO: this needs additional inputs due to user prompt
-                spectrogram_input_features=spectrogram_input_features,
-                spectrogram_attention_mask=spectrogram_attention_mask,
-                encoder_cross_attn_head_mask=encoder_cross_attn_head_mask,
-                encoder_head_mask=encoder_head_mask,
-                text_encoder_input_ids=text_encoder_input_ids,
-                text_encoder_inputs_embeds=text_encoder_inputs_embeds,
-                text_encoder_attention_mask=text_encoder_attention_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
+            encoder_outputs = (
+                self.encoder(  # TODO: this needs additional inputs due to user prompt
+                    spectrogram_input_features=spectrogram_input_features,
+                    spectrogram_attention_mask=spectrogram_attention_mask,
+                    encoder_cross_attn_head_mask=encoder_cross_attn_head_mask,
+                    encoder_head_mask=encoder_head_mask,
+                    text_encoder_input_ids=text_encoder_input_ids,
+                    text_encoder_inputs_embeds=text_encoder_inputs_embeds,
+                    text_encoder_attention_mask=text_encoder_attention_mask,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                )
             )
         # If the user passed a tuple for encoder_outputs, we wrap it in a BaseModelOutput when return_dict=True
         elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
@@ -945,7 +1056,7 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
             )
 
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
-        decoder_outputs = self.decoder.forward( # This can be left untouched since the decoder does not change
+        decoder_outputs = self.decoder.forward(  # This can be left untouched since the decoder does not change
             input_ids=decoder_input_ids,
             attention_mask=decoder_attention_mask,
             encoder_hidden_states=encoder_outputs[0],
@@ -975,40 +1086,186 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
             encoder_attentions=encoder_outputs.attentions,
         )
 
-if __name__ == '__main__':
-    def debug_msg(s: str,  sep='\n'*2+'#'*20+'\n'*2) -> None:
-        print(f'{sep}{s}{sep}', end='')
+
+class ContextWhisperForCausalLM(ContextWhisperPreTrainedModel, GenerationMixin):
+    _tied_weights_keys = ["proj_out.weight"]
+    main_input_name = "input_ids"
+
+    def __init__(self, config):
+        super().__init__(config)
+        config.is_encoder_decoder = False
+        self.model = ContextWhisperModel(config)
+
+        if config.whisper_pretrained_str is None:
+            self.proj_out = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        else:
+            self.proj_out = WhisperForCausalLM.from_pretrained(
+                config.whisper_pretrained_str
+            ).get_output_embeddings()
+        # Initialize weights and apply final processing
+        self.post_init()
+
+    def get_output_embeddings(self):
+        return self.proj_out
+
+    def set_output_embeddings(self, new_embeddings):
+        self.proj_out = new_embeddings
+
+    def get_input_embeddings(self) -> nn.Module:
+        return self.model.get_input_embeddings()
+
+    def set_input_embeddings(self, value):
+        self.model.set_input_embeddings(value)
+
+    def set_decoder(self, decoder):
+        self.model.decoder = decoder
+
+    def get_decoder(self):
+        return self.model.get_decoder()
+
+    def get_encoder(self):
+        return self.model.get_encoder()
+
+    def get_text_encoder(self):
+        return self.model.get_text_encoder()
+
+    def get_spectrogram_encoder(self):
+        return self.model.get_spectrogram_encoder()
+
+    def forward(
+        self,
+        # the commented features are not used for performance reasons
+        # spectrogram_input_features: Optional[torch.FloatTensor] = None,
+        # spectrogram_attention_mask: Optional[torch.LongTensor] = None, # "spectrogram self attention"
+        # encoder_cross_attn_head_mask: Optional[torch.Tensor] = None,
+        # text_encoder_input_ids: Optional[torch.LongTensor] = None,
+        # text_encoder_inputs_embeds: Optional[Tuple[torch.FloatTensor]] = None,
+        # text_encoder_attention_mask: Optional[torch.LongTensor] = None, # "spectrogram self attention"
+        decoder_input_ids: Optional[torch.LongTensor] = None,
+        decoder_inputs_embeds: Optional[Tuple[torch.FloatTensor]] = None,
+        decoder_attention_mask: Optional[torch.LongTensor] = None,
+        decoder_cross_attn_head_mask: Optional[torch.Tensor] = None,
+        # encoder_head_mask: Optional[torch.Tensor] = None,
+        decoder_head_mask: Optional[torch.Tensor] = None,
+        encoder_outputs: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
+        past_key_values: Optional[
+            Union[EncoderDecoderCache, Tuple[torch.FloatTensor]]
+        ] = None,
+        decoder_position_ids: Optional[Tuple[torch.LongTensor]] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        cache_position: Optional[torch.LongTensor] = None,
+    ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
+
+        # If the user passed a tuple or `BaseModelOutput` for encoder_outputs, we extract only the hidden states
+        if isinstance(encoder_outputs, (BaseModelOutput, tuple, list)):
+            encoder_outputs = encoder_outputs[0]
+
+        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
+        outputs = self.model.decoder(
+            decoder_input_ids=decoder_input_ids,
+            decoder_attention_mask=decoder_attention_mask,
+            encoder_hidden_states=encoder_outputs,
+            decoder_head_mask=decoder_head_mask,
+            decoder_cross_attn_head_mask=decoder_cross_attn_head_mask,
+            past_key_values=past_key_values,
+            decoder_inputs_embeds=decoder_inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+            cache_position=cache_position,
+            decoder_position_ids=decoder_position_ids,
+        )
+
+        logits = self.proj_out(outputs[0])
+
+        loss = None
+        if labels is not None:
+            labels = labels.to(logits.device)
+            loss_fct = torch.nn.CrossEntropyLoss()
+            loss = loss_fct(logits.view(-1, self.config.vocab_size), labels.view(-1))
+
+        if not return_dict:
+            output = (logits,) + outputs[1:]
+            return (loss,) + output if loss is not None else output
+
+        return CausalLMOutputWithCrossAttentions(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            cross_attentions=outputs.cross_attentions,
+        )
+
+    @staticmethod
+    def _reorder_cache(past_key_values, beam_idx):
+        reordered_past = ()
+        for layer_past in past_key_values:
+            reordered_past += (
+                tuple(
+                    past_state.index_select(0, beam_idx.to(past_state.device))
+                    for past_state in layer_past
+                ),
+            )
+        return reordered_past
+
+
+if __name__ == "__main__":
+
+    def debug_msg(s: str, sep="\n" * 2 + "#" * 20 + "\n" * 2) -> None:
+        print(f"{sep}{s}{sep}", end="")
+
     # debug some stuff
     d = 768
     config = ContextWhisperConfig(
         d_model=d
-    ) # TODO: somewhere here, the value of d_model gets overwritten!
+    )  # TODO: somewhere here, the value of d_model gets overwritten!
     model = ContextWhisperModel(config)
     test_input_decoder = torch.randint(0, 10, size=(10, 100))
     model.decoder(test_input_decoder)
-    debug_msg('model.decoder ok')
+    debug_msg("model.decoder ok")
 
     test_spectrogram_encoder = torch.rand(10, 80, 3000)
     model.spectrogram_encoder(test_spectrogram_encoder)
-    debug_msg('model.spectrogram_encoder ok') # TODO: this is weird. How does it get cross attention?
+    debug_msg(
+        "model.spectrogram_encoder ok"
+    )  # TODO: this is weird. How does it get cross attention?
 
     test_text_encoder = torch.randint(0, 10, size=(10, 100))
     model.text_encoder(test_text_encoder)
-    debug_msg('model.text_encoder ok')
+    debug_msg("model.text_encoder ok")
 
     # this should fail because there is no prompt:
     test_encoder_spec = torch.rand(10, 80, 3000)
     test_encoder_tok = torch.randint(0, 10, size=(10, 100))
     model.encoder.forward(
         text_encoder_input_ids=test_encoder_tok,
-        spectrogram_input_features=test_encoder_spec
+        spectrogram_input_features=test_encoder_spec,
     )
-    debug_msg('model.encoder ok')
+    debug_msg("model.encoder ok")
 
     test_decoder_tok = torch.randint(0, 10, size=(10, 100))
     model.forward(
         decoder_input_ids=test_decoder_tok,
         spectrogram_input_features=test_encoder_spec,
-        text_encoder_input_ids=test_encoder_tok
+        text_encoder_input_ids=test_encoder_tok,
     )
-    debug_msg('model.forward ok')
+    debug_msg("model.forward ok")
