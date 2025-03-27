@@ -1179,7 +1179,7 @@ class ContextWhisperForCausalLM(ContextWhisperPreTrainedModel, GenerationMixin):
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs = self.model.decoder(
-            decoder_input_ids=decoder_input_ids,
+            input_ids=decoder_input_ids,
             decoder_attention_mask=decoder_attention_mask,
             encoder_hidden_states=encoder_outputs,
             decoder_head_mask=decoder_head_mask,
