@@ -386,24 +386,24 @@ class TestModel:
                 *token_input.shape,
                 small_model.config.d_model,
             )
+
     def test_causal_pretrained_inputs(
-        self, 
+        self,
         token_input: torch.LongTensor,
         spectrogram_input: torch.Tensor,
     ) -> None:
         with torch.no_grad():
             config = Config(
                 d_model=768,
-                whisper_pretrained_str='openai/whisper-small',
+                whisper_pretrained_str="openai/whisper-small",
             )
             model = ContextWhisperForCausalLM(config)
             enc_out = model.get_encoder().forward(
                 text_encoder_input_ids=token_input,
-                spectrogram_input_features=spectrogram_input
+                spectrogram_input_features=spectrogram_input,
             )
             model_out = model.forward(
-                encoder_outputs=enc_out,
-                decoder_input_ids=token_input
+                encoder_outputs=enc_out, decoder_input_ids=token_input
             )
             assert model_out[0].shape == (*token_input.shape, config.vocab_size)
 
@@ -612,7 +612,7 @@ class TestModel:
             # TODO: check that deocder outputs match pretrained outputs
         if pretrained_whisper_causal_lm:
             model_eq(model.get_output_embeddings(), whisper.get_output_embeddings())
-            
+
 
 class TestProcessor:
     def test_basic_inputs(self, pretrained_model: Model):

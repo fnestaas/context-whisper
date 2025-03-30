@@ -198,7 +198,23 @@ class ContextWhisperEncoderLayer(WhisperEncoderLayer):
 
 
 class ContextWhisperDecoderLayer(WhisperDecoderLayer):
-    pass  # This is the same and we do not need to change anything
+    @classmethod
+    def from_whisper_layer(
+        cls,
+        from_layer: WhisperDecoderLayer,
+        layer_idx: int,
+        config: ContextWhisperConfig,
+    ) -> "ContextWhisperDecoderLayer":
+        layer = cls(config, layer_idx)
+        layer.self_attn = from_layer.self_attn
+        layer.activation_fn = from_layer.activation_fn
+        layer.self_attn_layer_norm = from_layer.self_attn_layer_norm
+        layer.encoder_attn = from_layer.encoder_attn
+        layer.encoder_attn_layer_norm = from_layer.encoder_attn_layer_norm
+        layer.fc1 = from_layer.fc1
+        layer.fc2 = from_layer.fc2
+        layer.final_layer_norm = from_layer.final_layer_norm
+        return layer
 
 
 class ContextWhisperSpectrogramEncoderLayer(nn.Module):
@@ -498,17 +514,6 @@ class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
             )
             pt_config = ContextWhisperConfig(**pt_config.to_dict())
             self.__init__(pt_config)
-            # new_layers = nn.ModuleList(
-            #     [
-            #         ContextWhisperSpectrogramEncoderLayer.from_whisper_layer(
-            #             from_layer=from_layer,
-            #             layer_idx=layer_idx,
-            #             config=config
-            #         ) # Note: in the original encoder, this is a WhisperEncoderLayer
-            #         for layer_idx, from_layer in enumerate(self.layers)
-            #     ]
-            # )
-            # self.layers = new_layers
             self.config = config
 
     @classmethod
@@ -695,6 +700,23 @@ class ContextWhisperDecoder(WhisperDecoder, ContextWhisperPreTrainedModel):
     def __init__(self, config: ContextWhisperConfig):
         super().__init__(config)
 
+    @classmethod
+    def from_whisper(
+        cls, whisper_decoder: WhisperDecoder, config: ContextWhisperConfig
+    ) -> "ContextWhisperDecoder":
+        context_whisper_dec: ContextWhisperDecoder = cls(config)
+        # set attributes
+        context_whisper_dec.layers = nn.ModuleList(
+            [
+                ContextWhisperDecoderLayer.from_whisper_layer(layer, idx, config)
+                for idx, layer in enumerate(whisper_decoder.layers)
+            ]
+        )
+        context_whisper_dec.embed_tokens = whisper_decoder.embed_tokens
+        context_whisper_dec.embed_positions = whisper_decoder.embed_positions
+        context_whisper_dec.layer_norm = whisper_decoder.layer_norm
+        return context_whisper_dec
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -823,15 +845,13 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
             text_encoder=self.text_encoder,
             spectrogram_encoder=self.spectrogram_encoder,
         )
-        # in the case where we load from pretrained, there will be a discrepancy, and we have to reload:
-        # self.text_encoder = self.encoder.text_encoder
-        # self.spectrogram_encoder = self.encoder.spectrogram_encoder
         if config.decoder_pretrained_str is None:
             self.decoder = ContextWhisperDecoder(config)
         else:
-            self.decoder = WhisperModel.from_pretrained(
+            decoder = WhisperModel.from_pretrained(
                 config.decoder_pretrained_str
             ).get_decoder()
+            self.decoder = ContextWhisperDecoder.from_whisper(decoder, config)
         # Initialize weights and apply final processing
         self.post_init()  # from transformers - no worries
 
@@ -1134,9 +1154,20 @@ class ContextWhisperForCausalLM(ContextWhisperPreTrainedModel, GenerationMixin):
 
     def freeze_module(
         self,
-        which: Literal["input_embeddings", "text_encoder", "decoder", "spectrogram_encoder", "encoder"],
+        which: Literal[
+            "input_embeddings",
+            "text_encoder",
+            "decoder",
+            "spectrogram_encoder",
+            "encoder",
+        ],
     ) -> None:
-        getattr(self, f"get_{which}")()._freeze_parameters()
+        if which == "input_embeddings":
+            emb = self.get_input_embeddings()
+            for p in emb.parameters():
+                p.requires_grad = False
+        else:
+            return self.model.freeze_module(which)
 
     def forward(
         self,
@@ -1180,7 +1211,10 @@ class ContextWhisperForCausalLM(ContextWhisperPreTrainedModel, GenerationMixin):
         )
 
         # If the user passed a tuple or `BaseModelOutput` for encoder_outputs, we extract only the hidden states
-        if isinstance(encoder_outputs, (BaseModelOutput, tuple, list, BaseModelOutputWithPastAndCrossAttentions)):
+        if isinstance(
+            encoder_outputs,
+            (BaseModelOutput, tuple, list, BaseModelOutputWithPastAndCrossAttentions),
+        ):
             encoder_outputs = encoder_outputs[0]
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
