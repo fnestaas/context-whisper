@@ -1161,14 +1161,15 @@ class ContextWhisperForCausalLM(ContextWhisperPreTrainedModel, GenerationMixin):
         self,
         which: Literal[
             "input_embeddings",
+            "output_embeddings",
             "text_encoder",
             "decoder",
             "spectrogram_encoder",
             "encoder",
         ],
     ) -> None:
-        if which == "input_embeddings":
-            emb = self.get_input_embeddings()
+        if which in ("input_embeddings", "output_embeddings"):
+            emb = getattr(self, f"get_{which}")()
             for p in emb.parameters():
                 p.requires_grad = False
         else:
