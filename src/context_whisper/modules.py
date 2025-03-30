@@ -444,22 +444,25 @@ class ContextWhisperTextEncoder(BertModel, ContextWhisperPreTrainedModel):  # TO
                 "begin_suppress_tokens",
             ]
         )
-        keep_attrs = set(
-            [
-                # 'pad_token_id',
-                # 'bos_token_id',
-                # 'eos_token_id',
-                # 'is_encoder_decoder',
-                # 'decoder_start_token_id',
-                # 'suppress_tokens',
-                # 'begin_suppress_tokens',
-            ]
-        )  # passed to super in ContextWhisperConfig
+        keep_attrs = set()  # passed to super in ContextWhisperConfig
         return {
             k: v
             for k, v in config.to_dict().items()
             if k not in drop_attrs - keep_attrs
         }
+
+    @classmethod
+    def from_bert(
+        cls,
+        bert_model: BertModel,
+        config: ContextWhisperConfig,
+    ) -> "ContextWhisperTextEncoder":
+        text_enc = cls(config)
+        # set attributes
+        text_enc.embeddings = bert_model.embeddings
+        text_enc.encoder = bert_model.encoder
+        text_enc.pooler = bert_model.pooler
+        return text_enc
 
 
 class ContextWhisperSpectrogramEncoder(ContextWhisperPreTrainedModel):
@@ -827,8 +830,9 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
             assert (
                 "google-bert/" in config.text_encoder_pretrained_str
             ), "Required in this implementation"
-            self.text_encoder = BertModel.from_pretrained(
-                config.text_encoder_pretrained_str
+            text_encoder = BertModel.from_pretrained(config.text_encoder_pretrained_str)
+            self.text_encoder = ContextWhisperTextEncoder.from_bert(
+                text_encoder, config
             )
         if config.spectrogram_encoder_pretrained_str is None:
             self.spectrogram_encoder = ContextWhisperSpectrogramEncoder(config)
@@ -852,6 +856,7 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
                 config.decoder_pretrained_str
             ).get_decoder()
             self.decoder = ContextWhisperDecoder.from_whisper(decoder, config)
+            assert isinstance(self.decoder, ContextWhisperDecoder)
         # Initialize weights and apply final processing
         self.post_init()  # from transformers - no worries
 
@@ -1111,13 +1116,13 @@ class ContextWhisperForCausalLM(ContextWhisperPreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["proj_out.weight"]
     main_input_name = "input_ids"
 
-    def __init__(self, config):
+    def __init__(self, config: ContextWhisperConfig):
         super().__init__(config)
         config.is_encoder_decoder = False
         self.model = ContextWhisperModel(config)
 
         if config.whisper_pretrained_str is None:
-            self.proj_out = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+            self.proj_out = nn.Linear(config.d_model, config.vocab_size, bias=False)
         else:
             self.proj_out = WhisperForCausalLM.from_pretrained(
                 config.whisper_pretrained_str

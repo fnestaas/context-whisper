@@ -37,7 +37,7 @@ Encoder = ContextWhisperEncoder
 Decoder = ContextWhisperDecoder
 Model = ContextWhisperModel
 SpectrogramEncoder = ContextWhisperSpectrogramEncoder
-
+CausalModel = ContextWhisperForCausalLM
 
 @pytest.fixture
 def default_config() -> ContextWhisperConfig:
@@ -70,7 +70,7 @@ def semipretrained_config():
 
 
 @pytest.fixture
-def default_model(default_config) -> Model:
+def default_model(default_config: Config) -> Model:
     return Model(default_config)
 
 
@@ -86,8 +86,29 @@ def semipretrained_model(semipretrained_config: Config) -> Model:
 
 
 @pytest.fixture
-def small_model(small_config) -> Model:
+def small_model(small_config: Config) -> Model:
     return Model(small_config)
+
+
+@pytest.fixture
+def default_causal_model(default_config: Config) -> Model:
+    return CausalModel(default_config)
+
+
+@pytest.fixture
+def pretrained_causal_model(pretrained_config: Config) -> Model:
+    # pretrained text_encoder, decoder and spectrogram_encoder
+    return CausalModel(pretrained_config)
+
+
+@pytest.fixture
+def semipretrained_causal_model(semipretrained_config: Config) -> Model:
+    return CausalModel(semipretrained_config)
+
+
+@pytest.fixture
+def small_causal_model(small_config: Config) -> Model:
+    return CausalModel(small_config)
 
 
 @pytest.fixture
@@ -288,7 +309,13 @@ class TestSpectrogramEncoder:
 
     # TODO: test layer
     @pytest.mark.parametrize(
-        "size_id", ["small", "default", "pretrained", "semipretrained"]
+        "size_id",
+        [
+            "small",
+            "default",
+            # "pretrained", # memory issues
+            "semipretrained",
+        ],
     )
     def test_basic_emb(
         self,
@@ -406,6 +433,21 @@ class TestModel:
                 encoder_outputs=enc_out, decoder_input_ids=token_input
             )
             assert model_out[0].shape == (*token_input.shape, config.vocab_size)
+
+    @pytest.mark.parametrize("which", ["small", "pretrained", "semipretrained"])
+    def test_get_module(
+        self,
+        which: str,
+        request: pytest.FixtureRequest,
+    ) -> None:
+        model = request.getfixturevalue(f"{which}_model")
+        assert isinstance(model, Model)
+        assert isinstance(model.get_decoder(), ContextWhisperDecoder)
+        assert isinstance(model.get_encoder(), ContextWhisperEncoder)
+        assert isinstance(
+            model.get_spectrogram_encoder(), ContextWhisperSpectrogramEncoder
+        )
+        assert isinstance(model.get_text_encoder(), ContextWhisperTextEncoder)
 
     @pytest.mark.parametrize(
         "module", ["decoder", "spectrogram_encoder", "text_encoder"]
@@ -640,3 +682,21 @@ class TestProcessor:
                 len(tokens["input_ids"]),
                 pretrained_model.get_decoder().layer_norm.weight.shape[0],
             )
+
+class TestContextWhisperForCausalLM:
+    @pytest.mark.parametrize("which", ["small", "pretrained", "semipretrained"])
+    def test_get_module(
+        self,
+        which: str,
+        request: pytest.FixtureRequest,
+    ) -> None:
+        model = request.getfixturevalue(f"{which}_causal_model")
+        assert isinstance(model, CausalModel)
+        assert isinstance(model.get_decoder(), ContextWhisperDecoder)
+        assert isinstance(model.get_encoder(), ContextWhisperEncoder)
+        assert isinstance(
+            model.get_spectrogram_encoder(), ContextWhisperSpectrogramEncoder
+        )
+        assert isinstance(model.get_text_encoder(), ContextWhisperTextEncoder)
+        assert isinstance(model.get_output_embeddings(), torch.nn.Linear)
+
