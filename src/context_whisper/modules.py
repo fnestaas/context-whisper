@@ -877,7 +877,7 @@ class ContextWhisperModel(ContextWhisperPreTrainedModel):
         calling self.freeze_module('text_encoder') and then
         self.freeze_module('spectrogram_encoder')
         """
-        getattr(self, which)._freeze_parameters()
+        getattr(self, f"get_{which}")()._freeze_parameters()
 
     def _mask_input_features(
         self,
@@ -1131,6 +1131,12 @@ class ContextWhisperForCausalLM(ContextWhisperPreTrainedModel, GenerationMixin):
 
     def get_spectrogram_encoder(self):
         return self.model.get_spectrogram_encoder()
+
+    def freeze_module(
+        self,
+        which: Literal["input_embeddings", "text_encoder", "decoder", "spectrogram_encoder", "encoder"],
+    ) -> None:
+        getattr(self, f"get_{which}")()._freeze_parameters()
 
     def forward(
         self,
