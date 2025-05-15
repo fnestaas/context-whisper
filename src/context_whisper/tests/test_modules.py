@@ -39,6 +39,7 @@ Model = ContextWhisperModel
 SpectrogramEncoder = ContextWhisperSpectrogramEncoder
 CausalModel = ContextWhisperForCausalLM
 
+
 @pytest.fixture
 def default_config() -> ContextWhisperConfig:
     return ContextWhisperConfig(d_model=768)
@@ -683,6 +684,7 @@ class TestProcessor:
                 pretrained_model.get_decoder().layer_norm.weight.shape[0],
             )
 
+
 class TestContextWhisperForCausalLM:
     @pytest.mark.parametrize("which", ["small", "pretrained", "semipretrained"])
     def test_get_module(
@@ -699,4 +701,3 @@ class TestContextWhisperForCausalLM:
         )
         assert isinstance(model.get_text_encoder(), ContextWhisperTextEncoder)
         assert isinstance(model.get_output_embeddings(), torch.nn.Linear)
-

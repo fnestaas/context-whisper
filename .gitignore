@@ -53,3 +53,4 @@ docs/_build/
 **/dev_notebooks/**/*
 .vscode
 secrets/
+.env
