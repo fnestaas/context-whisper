@@ -41,3 +41,8 @@ Long break, had time again.
 I decided on using the Spoken Wikipedia Corpus because it has long, coherent text, as a starting point.
 However, I was not able to find a ready-to-use version of the dataset and wrote my own python parser based on the provided `aligned.swc` files and the schema defined on [their website](https://nats.gitlab.io/swc/).
 The parser is (at the time of writing) in `src/dev_scripts/parse_wiki.py`.
+
+## Day 10
+Short session. 
+Started implementing `SWCDataset`, a dataset which is to be used in pytorch to train ContextWhisperModels.
+It is based on the Spoken Wikipedia Corpus and provides descriptions, waveforms and text from segments of batches of Wikipedia articles.

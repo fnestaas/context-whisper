@@ -12,7 +12,7 @@ from transformers.models.whisper.modeling_whisper import (WhisperEncoderLayer,
                                                           WhisperModel)
 from transformers.models.whisper.tokenization_whisper import WhisperTokenizer
 
-from src.context_whisper.modules import (ContextWhisperConfig,
+from context_whisper.modules import (ContextWhisperConfig,
                                          ContextWhisperDecoder,
                                          ContextWhisperDecoderLayer,
                                          ContextWhisperEncoder,
@@ -23,7 +23,7 @@ from src.context_whisper.modules import (ContextWhisperConfig,
                                          ContextWhisperSpectrogramEncoder,
                                          ContextWhisperSpectrogramEncoderLayer,
                                          ContextWhisperTextEncoder)
-from src.context_whisper.processing import ContextWhisperProcessor
+from context_whisper.processing import ContextWhisperProcessor
 
 # define shorthand aliases
 # (we could also import the classes like this but by defining it here, we can use two names)

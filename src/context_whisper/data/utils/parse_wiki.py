@@ -14,7 +14,7 @@ Tk = TypeVar("Tk", bound="Token")
 class BaseElement(ABC):
     @classmethod
     @abstractmethod
-    def from_dict_(cls, input: dict) -> T:
+    def from_dict_(cls, input_dict: dict) -> T:
         raise NotImplementedError()
 
     @classmethod
@@ -53,7 +53,7 @@ class Timing(BaseElement):
     end_time: int | None = None
 
     @classmethod
-    def from_dict_(cls, input_dict: dict) -> T:
+    def from_dict_(cls, input_dict: dict) -> "Timing":
         # only implemented because the parent has an abstract method like this
         return cls(
             start=input_dict.get("@start"),
@@ -70,7 +70,7 @@ class Phoneme(BaseElement):
     timing: Timing | None = None
 
     @classmethod
-    def from_dict_(cls, input_dict: dict) -> T:
+    def from_dict_(cls, input_dict: dict) -> "Phoneme":
         return cls(
             type=input_dict.get("@type"),
             timing=Timing(input_dict.get("@start"), input_dict.get("@end")),
@@ -87,7 +87,7 @@ class Normalization(BaseElement):
     ph: Phoneme | None = None
 
     @classmethod
-    def from_dict_(cls, input_dict: dict) -> T:
+    def from_dict_(cls, input_dict: dict) -> "Normalization":
         return cls(
             pronunciation=input_dict.get("@pronunciation"),
             timing=Timing(input_dict.get("@start"), input_dict.get("@end")),
@@ -104,14 +104,14 @@ class Token(BaseElement):
     n: Normalization | list[Normalization] | None = None
 
     @classmethod
-    def from_dict_(cls, input_dict: dict) -> T:
+    def from_dict_(cls, input_dict: dict) -> "Token":
         return cls(
             text=input_dict.get("#text"),
             n=Normalization.from_dict(input_dict.get("n")),
         )
 
     @classmethod
-    def from_str(cls, input: str) -> Tk:
+    def from_str(cls, input: str) -> "Token":
         return cls(text=input)
 
     def as_tuple(self) -> tuple[int | None, int | None, str]:
@@ -128,7 +128,7 @@ class Token(BaseElement):
         else:
             return (t.start_time, t.end_time, self.text)
 
-    def get_flat_token_tuples(self) -> list[int | None, int | None, str]:
+    def get_flat_token_tuples(self) -> list[tuple[int | None, int | None, str]]:
         return [self.as_tuple()]
 
 
@@ -137,7 +137,7 @@ class Sentence(BaseElement):
     t: Token | list[Token]
 
     @classmethod
-    def from_dict_(cls, input_dict: dict) -> T:
+    def from_dict_(cls, input_dict: dict) -> "Sentence":
         return cls(t=Token.from_dict(input_dict.get("t")))
 
 
@@ -146,7 +146,7 @@ class Paragraph(BaseElement):
     s: Sentence | list[Sentence] | None = None
 
     @classmethod
-    def from_dict_(cls, input_dict: dict) -> T:
+    def from_dict_(cls, input_dict: dict) -> "Paragraph":
         return cls(s=Sentence.from_dict(input_dict.get("s")))
 
 
@@ -157,7 +157,7 @@ class Sectioncontent(BaseElement):
     section: "Section | list[Section] | None" = None
 
     @classmethod
-    def from_dict_(cls, input_dict: dict) -> T:
+    def from_dict_(cls, input_dict: dict) -> "Sectioncontent":
         return cls(
             s=Sentence.from_dict(input_dict.get("s")),
             p=Paragraph.from_dict(input_dict.get("p")),
@@ -170,7 +170,7 @@ class Sectiontitle(BaseElement):
     t: Token | list[Token] | None = None
 
     @classmethod
-    def from_dict_(cls, input_dict: dict) -> T:
+    def from_dict_(cls, input_dict: dict) -> "Sectiontitle":
         return cls(
             t=Token.from_dict(input_dict.get("t")),
         )
@@ -183,7 +183,7 @@ class Section(BaseElement):
     sectioncontent: Sectioncontent | None = None
 
     @classmethod
-    def from_dict_(cls, input_dict: dict) -> T:
+    def from_dict_(cls, input_dict: dict) -> "Section":
         return cls(
             level=input_dict.get("level"),
             sectiontitle=Sectiontitle.from_dict(input_dict.get("sectiontitle")),
@@ -198,7 +198,7 @@ class Document(BaseElement):
     s: Sentence | None = None
 
     @classmethod
-    def from_file(cls, source: Path | str) -> D:
+    def from_file(cls, source: Path | str) -> "Document":
         with open(source) as xml_stream:
             input_dict: dict = xml.parse(xml_stream.read()).get("article")
         doc_dict = input_dict["d"]
@@ -206,7 +206,7 @@ class Document(BaseElement):
         return Document.from_dict(doc_dict)
 
     @classmethod
-    def from_dict_(cls, doc_dict: dict) -> T:
+    def from_dict_(cls, doc_dict: dict) -> "Document":
         return cls(
             p=Paragraph.from_dict(doc_dict.get("p")),
             section=Section.from_dict(doc_dict.get("section")),
